@@ -147,6 +147,8 @@ const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 // ---------------------------------------------------------------- renderer / scene
 const canvas = $('#scene');
+// GPU dropped the context (memory pressure, driver reset): hide the dead canvas (never a white box) and reload
+canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); canvas.style.visibility = 'hidden'; setTimeout(() => location.reload(), 1500); }, false);
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;

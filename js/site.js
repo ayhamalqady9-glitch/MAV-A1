@@ -67,6 +67,31 @@ function keyed(p, keys) {
 
 // ------------------------------------------------------------------ renderer, scenes, post-processing
 const canvas = $('#stage-canvas');
+
+// If the GPU drops a WebGL context (memory pressure, a driver reset), Chrome draws the dead canvas white. Hide it at
+// once (the page stays black), say what is happening, then reload at the same point of the story, resuming PRESENT
+// if it was playing: a fresh page is the only reliable way back for every texture and render target.
+const GL_RESUME = 'mav-gl-resume';
+let glLost = false;
+function glRecover() {
+  try {
+    sessionStorage.setItem(GL_RESUME, JSON.stringify({ y: scrollY, present: !!(present.on && !present.paused) }));
+  } catch (e) { /* storage blocked: reload from the top */ }
+  location.reload();
+}
+function watchGL(cv) {
+  cv.addEventListener('webglcontextlost', (e) => {
+    e.preventDefault();                                     // lets the browser hand the context back
+    if (glLost) return;
+    glLost = true;
+    document.querySelectorAll('#stage-canvas, #slam-canvas').forEach((c) => { c.style.visibility = 'hidden'; });
+    document.documentElement.classList.add('gl-lost');
+    setTimeout(glRecover, 2500);                            // restored or not, reload once the message has shown
+  }, false);
+}
+watchGL(canvas);
+watchGL($('#slam-canvas'));
+
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: !MOBILE, powerPreference: 'high-performance' });
 const DPR = Math.min(devicePixelRatio, MOBILE ? 1.5 : 2);
 renderer.setPixelRatio(DPR);
@@ -541,6 +566,12 @@ async function init() {
   onScroll(); pSmooth = pTarget;
   await warmUp();
   renderer.setAnimationLoop(frame);
+  let resume = null;                                        // back from a GPU reset: same point, same mode
+  try { resume = JSON.parse(sessionStorage.getItem(GL_RESUME) || 'null'); sessionStorage.removeItem(GL_RESUME); } catch (e) { /* none */ }
+  if (resume) {
+    scrollTo({ top: resume.y, behavior: 'auto' });
+    if (resume.present) startPresent();
+  }
   setTimeout(() => { const l = $('#loader'); l.style.opacity = 0; setTimeout(() => l.remove(), 700); }, 60);
   if (new URLSearchParams(location.search).has('debug')) {
     window.mav = {
