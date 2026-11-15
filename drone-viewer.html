@@ -1,0 +1,390 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MAV-A1 3D Inspection</title>
+<link rel="icon" href="assets/img/favicon.svg" type="image/svg+xml">
+<link href="assets/fonts/fonts.css" rel="stylesheet">
+<style>
+  :root {
+    --slate-ui: #313C4B; --void-black: #000000; --cosmic-purple: #190738; --orbital-navy: #0A2458;
+    --lidar-cyan: #00A8CC; --starlight-white: #F0F6FC; --mars-orange: #FF3305;
+    --font-header: 'Michroma', sans-serif; --font-body: 'Space Grotesk', sans-serif; --font-tech: 'Saira', sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; color: var(--starlight-white); font-family: var(--font-body);
+    background: radial-gradient(120% 90% at 50% 40%, var(--orbital-navy) 0%, var(--cosmic-purple) 45%, var(--void-black) 100%); }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+  .glass { background: rgba(10, 36, 88, 0.55); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--slate-ui); border-radius: 4px; position: relative; }
+  .glass::before, .glass::after { content: ''; position: absolute; width: 10px; height: 10px; border: 1.5px solid var(--lidar-cyan); }
+  .glass::before { top: -1px; left: -1px; border-right: 0; border-bottom: 0; }
+  .glass::after { bottom: -1px; right: -1px; border-left: 0; border-top: 0; }
+
+  header { position: fixed; top: 16px; left: 16px; padding: 12px 16px; max-width: calc(100vw - 32px); }
+  header h1 { font-family: var(--font-header); font-size: 14px; letter-spacing: 0.12em; text-transform: uppercase; margin: 0 0 4px; font-weight: 400; }
+  header p { font-family: var(--font-tech); font-size: 12px; letter-spacing: 0.08em; color: var(--lidar-cyan); margin: 0; }
+
+  .panel { position: fixed; top: 16px; right: 16px; width: 248px; padding: 14px; display: grid; gap: 12px;
+    max-height: calc(100vh - 32px); overflow-y: auto; overflow-x: hidden; }
+  .panel h2 { font-family: var(--font-tech); font-weight: 600; font-size: 11px; letter-spacing: 0.14em; color: var(--lidar-cyan); margin: 0 0 6px; text-transform: uppercase; }
+  .row { display: flex; flex-wrap: wrap; gap: 6px; }
+  button { font-family: var(--font-tech); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer;
+    color: var(--starlight-white); background: rgba(0, 0, 0, 0.35); border: 1px solid var(--slate-ui); border-radius: 3px; padding: 7px 9px; }
+  button:hover { border-color: var(--lidar-cyan); }
+  button[aria-pressed="true"] { background: rgba(0, 168, 204, 0.18); border-color: var(--lidar-cyan); color: var(--lidar-cyan); }
+  button:focus-visible { outline: 2px solid var(--lidar-cyan); outline-offset: 2px; }
+  .mode { flex: 1; min-width: 0; padding: 7px 4px; }
+  label.slider { display: grid; gap: 4px; font-family: var(--font-tech); font-size: 12px; letter-spacing: 0.08em; }
+  input[type=range] { width: 100%; accent-color: var(--lidar-cyan); }
+
+  .telemetry { position: fixed; left: 16px; bottom: 16px; padding: 10px 14px; font-family: var(--font-tech); font-size: 12px;
+    letter-spacing: 0.08em; display: grid; grid-template-columns: auto auto; gap: 2px 14px; font-variant-numeric: tabular-nums; }
+  .telemetry span:nth-child(odd) { color: var(--lidar-cyan); }
+  .hints { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); padding: 8px 14px; font-family: var(--font-tech);
+    font-size: 12px; letter-spacing: 0.06em; text-align: center; max-width: min(560px, calc(100vw - 32px)); }
+  .ref { position: fixed; right: 280px; top: 16px; width: 260px; padding: 8px; display: none; }
+  .ref.show { display: block; }
+  .ref img { width: 100%; display: block; background: #fff; border-radius: 2px; }
+  .ref small { display: block; font-family: var(--font-tech); font-size: 11px; color: var(--lidar-cyan); margin-top: 6px; letter-spacing: 0.08em; }
+
+  .pad { position: fixed; left: 16px; bottom: 120px; display: none; grid-template-columns: repeat(3, 48px); gap: 6px; }
+  .pad.show { display: grid; }
+  .pad button { height: 48px; padding: 0; font-size: 16px; }
+  .pad .up2 { grid-column: 3; }
+
+  @media (max-width: 760px) {
+    .panel { top: auto; bottom: 16px; right: 16px; left: 16px; width: auto; max-height: 42vh; }
+    .telemetry, .hints, .ref.show { display: none; }
+    .pad { bottom: calc(42vh + 32px); }
+  }
+  @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "./vendor/three/build/three.module.js",
+  "three/addons/": "./vendor/three/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<canvas id="scene" aria-label="Interactive 3D model of the MAV-A1 hexacopter"></canvas>
+
+<header class="glass">
+  <h1>MAV-A1 // 3D Inspection</h1>
+  <p>HEXACOPTER · 6 ROTORS × 6 BLADES · LiDAR · STEREO CAM</p>
+</header>
+
+<aside class="panel glass" aria-label="Viewer controls">
+  <div>
+    <h2>Mode</h2>
+    <div class="row">
+      <button class="mode" data-mode="inspect" aria-pressed="true">Inspect</button>
+      <button class="mode" data-mode="fly" aria-pressed="false">Fly</button>
+      <button class="mode" data-mode="demo" aria-pressed="false">Demo</button>
+    </div>
+  </div>
+  <div>
+    <h2>Views</h2>
+    <div class="row">
+      <button data-view="front">Front</button><button data-view="side">Side</button><button data-view="back">Back</button>
+      <button data-view="top">Top</button><button data-view="bottom">Bottom</button><button data-view="iso">Iso</button>
+    </div>
+  </div>
+  <div>
+    <h2>Display</h2>
+    <div class="row">
+      <button id="tSpin" aria-pressed="true">Rotors</button>
+      <button id="tAuto" aria-pressed="true">Auto-rotate</button>
+      <button id="tRef" aria-pressed="false">Ref image</button>
+      <button id="tAlert" aria-pressed="false">Alert LEDs</button>
+    </div>
+  </div>
+  <label class="slider">ROTOR SPEED <input id="rpm" type="range" min="0" max="100" value="55"></label>
+  <div class="row"><button id="exportGlb" style="flex:1">Download .GLB</button></div>
+</aside>
+
+<div class="ref glass" id="ref"><img id="refImg" alt="Original MAV-A1 reference view" src="assets/img/ref-mav-a1-views.webp"><small id="refLabel">REFERENCE // ALL VIEWS</small></div>
+
+<div class="telemetry glass" aria-live="off">
+  <span>YAW</span><span id="tmYaw">000.0°</span>
+  <span>PITCH</span><span id="tmPitch">+00.0°</span>
+  <span>ROLL</span><span id="tmRoll">+00.0°</span>
+  <span>ALT</span><span id="tmAlt">0.00 M</span>
+  <span>ROTOR</span><span id="tmRpm">0000 RPM</span>
+</div>
+<div class="hints glass" id="hints"></div>
+
+<div class="pad" id="pad" aria-label="Flight pad">
+  <button data-k="yawL" aria-label="Yaw left">⟲</button><button data-k="fwd" aria-label="Forward">▲</button><button data-k="yawR" aria-label="Yaw right">⟳</button>
+  <button data-k="left" aria-label="Left">◀</button><button data-k="back" aria-label="Back">▼</button><button data-k="right" aria-label="Right">▶</button>
+  <button data-k="up" aria-label="Climb">⇡</button><button data-k="down" aria-label="Descend" class="up2">⇣</button>
+</div>
+
+<script>
+  if (location.protocol === 'file:') {
+    const n = document.createElement('div');
+    n.className = 'glass';
+    n.style.cssText = 'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:50;padding:18px;width:min(520px,calc(100vw - 32px));font-size:14px';
+    n.innerHTML = '<div style="font-family:var(--font-tech);color:var(--mars-orange);letter-spacing:.1em">OPEN THROUGH THE LOCAL SERVER</div>' +
+      '<p style="margin:10px 0 0">Browsers block the 3D model when this page is opened straight from the folder. Double-click <b>start-site.bat</b>, then open <b>http://localhost:5173/drone-viewer.html</b>.</p>' +
+      '<p dir="rtl" lang="ar" style="margin:10px 0 0">اكبس مرتين على <bdi><b>start-site.bat</b></bdi> وبعدين افتح الرابط هاد.</p>';
+    document.body.appendChild(n);
+  }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { TrackballControls } from 'three/addons/controls/TrackballControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+import { createMAVA1, MAV_DIMENSIONS } from './js/mav-a1-model.js';
+
+const $ = (s) => document.querySelector(s);
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const damp = (k, dt) => 1 - Math.exp(-k * dt);
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// ---------------------------------------------------------------- renderer / scene
+const canvas = $('#scene');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+scene.environmentIntensity = 0.55;
+
+const camera = new THREE.PerspectiveCamera(35, 1, 0.05, 100);
+camera.position.set(3.2, 2.0, 3.6);
+
+scene.add(new THREE.HemisphereLight(0x9fb4ff, 0x1a0c2a, 0.6));
+const key = new THREE.DirectionalLight(0xffe2c4, 2.4);
+key.position.set(4, 7, 3); key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048);
+Object.assign(key.shadow.camera, { left: -5, right: 5, top: 5, bottom: -5, near: 1, far: 20 });
+key.shadow.bias = -0.0004;
+scene.add(key);
+const rim = new THREE.DirectionalLight(0x00a8cc, 1.6); rim.position.set(-4, 2, -5); scene.add(rim);
+
+const GROUND_Y = -1.0;
+const ground = new THREE.Group();
+const shadowPlane = new THREE.Mesh(new THREE.PlaneGeometry(30, 30), new THREE.ShadowMaterial({ opacity: 0.38 }));
+shadowPlane.rotation.x = -Math.PI / 2; shadowPlane.receiveShadow = true; ground.add(shadowPlane);
+const grid = new THREE.GridHelper(30, 60, 0x00a8cc, 0x313c4b);
+grid.material.transparent = true; grid.material.opacity = 0.28; grid.position.y = 0.001; ground.add(grid);
+ground.position.y = GROUND_Y; scene.add(ground);
+
+// ---------------------------------------------------------------- drone
+const drone = createMAVA1();
+scene.add(drone.object);
+let rpmSetting = 0.55, rotorsOn = true;
+drone.setRPM(rpmSetting);
+const MIN_Y = GROUND_Y - MAV_DIMENSIONS.footY + 0.03; // foot pads resting on the ground
+
+// ---------------------------------------------------------------- controls (free 360° in every direction)
+const controls = new TrackballControls(camera, canvas);
+Object.assign(controls, { rotateSpeed: 3.2, zoomSpeed: 1.1, panSpeed: 0.7, dynamicDampingFactor: 0.12, minDistance: 1.2, maxDistance: 14 });
+controls.keys = ['', '', '']; // keyboard is used for flying, not for trackball modifiers
+let userBusy = false, lastInteract = 0;
+controls.addEventListener('start', () => { userBusy = true; cancelTween(); });
+controls.addEventListener('end', () => { userBusy = false; lastInteract = performance.now(); });
+
+// camera presets (positions relative to the drone; "up" set so the nose reads like the reference)
+const VIEWS = {
+  front: { pos: [0, 0.25, 4.6], up: [0, 1, 0], ref: 'assets/img/mav-a1-front.webp', label: 'REFERENCE // FRONT' },
+  side: { pos: [4.6, 0.25, 0], up: [0, 1, 0], ref: 'assets/img/mav-a1-side.webp', label: 'REFERENCE // SIDE (skid gear not modelled)' },
+  back: { pos: [0, 0.25, -4.6], up: [0, 1, 0], ref: 'assets/img/mav-a1-back.webp', label: 'REFERENCE // BACK' },
+  top: { pos: [0, 5.2, 0.0001], up: [0, 0, 1], ref: 'assets/img/mav-a1-top.webp', label: 'REFERENCE // TOP' },
+  bottom: { pos: [0, -5.2, 0.0001], up: [0, 0, 1], ref: 'assets/img/ref-mav-a1-views.webp', label: 'REFERENCE // ALL VIEWS' },
+  iso: { pos: [3.2, 2.0, 3.6], up: [0, 1, 0], ref: 'assets/img/ref-mav-a1-views.webp', label: 'REFERENCE // ALL VIEWS' },
+};
+let tween = null;
+function cancelTween() { tween = null; }
+function goView(name) {
+  const v = VIEWS[name]; const target = drone.object.position.clone();
+  tween = {
+    t: 0, dur: reduceMotion ? 0.01 : 0.9,
+    p0: camera.position.clone(), p1: target.clone().add(new THREE.Vector3(...v.pos)),
+    u0: camera.up.clone(), u1: new THREE.Vector3(...v.up), target,
+  };
+  $('#refImg').src = v.ref; $('#refLabel').textContent = v.label;
+  setAuto(false);
+}
+
+// ---------------------------------------------------------------- modes
+let mode = 'inspect';
+const fly = { pos: new THREE.Vector3(), vel: new THREE.Vector3(), yaw: 0, yawRate: 0, pitch: 0, roll: 0 };
+const input = { fwd: 0, back: 0, left: 0, right: 0, up: 0, down: 0, yawL: 0, yawR: 0 };
+const HINTS = {
+  inspect: 'DRAG = ROTATE IN ANY DIRECTION · RIGHT-DRAG / 2 FINGERS = PAN · WHEEL / PINCH = ZOOM',
+  fly: 'W/S FORWARD-BACK · A/D LEFT-RIGHT · Q/E YAW · SPACE / SHIFT UP-DOWN · CAMERA STILL ROTATES WITH DRAG',
+  demo: 'AUTOPILOT DEMO · CLIMB, BANK, YAW AND STRAFE IN ALL DIRECTIONS · DRAG TO WATCH FROM ANY ANGLE',
+};
+function setMode(m) {
+  mode = m;
+  document.querySelectorAll('[data-mode]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === m)));
+  $('#hints').textContent = HINTS[m];
+  $('#pad').classList.toggle('show', m === 'fly' && matchMedia('(pointer: coarse)').matches);
+  fly.pos.copy(drone.object.position); fly.vel.set(0, 0, 0);
+  if (m === 'inspect') { drone.setAttitude(0, 0, 0); fly.yaw = fly.pitch = fly.roll = 0; }
+  if (m !== 'inspect') setAuto(false);
+  demoT = 0;
+}
+document.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
+document.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => goView(b.dataset.view)));
+
+let autoRotate = !reduceMotion;
+function setAuto(on) { autoRotate = on; $('#tAuto').setAttribute('aria-pressed', String(on)); }
+setAuto(autoRotate);
+$('#tAuto').addEventListener('click', () => setAuto(!autoRotate));
+$('#tSpin').addEventListener('click', (e) => { rotorsOn = !rotorsOn; e.currentTarget.setAttribute('aria-pressed', String(rotorsOn)); });
+$('#tRef').addEventListener('click', (e) => { const on = e.currentTarget.getAttribute('aria-pressed') !== 'true'; e.currentTarget.setAttribute('aria-pressed', String(on)); $('#ref').classList.toggle('show', on); });
+$('#tAlert').addEventListener('click', (e) => { const on = e.currentTarget.getAttribute('aria-pressed') !== 'true'; e.currentTarget.setAttribute('aria-pressed', String(on)); drone.setAlert(on); });
+$('#rpm').addEventListener('input', (e) => { rpmSetting = e.target.value / 100; });
+
+const KEYMAP = { KeyW: 'fwd', ArrowUp: 'fwd', KeyS: 'back', ArrowDown: 'back', KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right',
+  Space: 'up', KeyR: 'up', ShiftLeft: 'down', ShiftRight: 'down', KeyF: 'down', KeyQ: 'yawL', KeyE: 'yawR' };
+addEventListener('keydown', (e) => {
+  if (e.code === 'Space' && e.target instanceof Element && e.target.closest('input, button')) return;
+  const k = KEYMAP[e.code]; if (!k) return;
+  if (mode !== 'fly') setMode('fly');
+  input[k] = 1; e.preventDefault();
+});
+addEventListener('keyup', (e) => { const k = KEYMAP[e.code]; if (k) input[k] = 0; });
+document.querySelectorAll('#pad [data-k]').forEach((b) => {
+  const k = b.dataset.k;
+  b.addEventListener('pointerdown', (e) => { input[k] = 1; b.setPointerCapture(e.pointerId); });
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach((ev) => b.addEventListener(ev, () => { input[k] = 0; }));
+});
+
+// ---------------------------------------------------------------- export
+$('#exportGlb').addEventListener('click', () => {
+  const blurWas = drone.materials.blur.opacity, bladeWas = drone.materials.blade.opacity;
+  drone.materials.blur.opacity = 0; drone.materials.blade.opacity = 1;
+  new GLTFExporter().parse(drone.object, (glb) => {
+    drone.materials.blur.opacity = blurWas; drone.materials.blade.opacity = bladeWas;
+    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([glb], { type: 'model/gltf-binary' })), download: 'mav-a1.glb' });
+    a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }, (err) => console.error(err), { binary: true });
+});
+
+// ---------------------------------------------------------------- simulation
+const fwdV = new THREE.Vector3(), rightV = new THREE.Vector3(), acc = new THREE.Vector3(), delta = new THREE.Vector3();
+function stepFly(dt) {
+  const f = input.fwd - input.back, s = input.right - input.left, u = input.up - input.down, y = input.yawL - input.yawR;
+  fwdV.set(Math.sin(fly.yaw), 0, Math.cos(fly.yaw));
+  rightV.set(-Math.cos(fly.yaw), 0, Math.sin(fly.yaw));
+  acc.copy(fwdV).multiplyScalar(f * 5.5).addScaledVector(rightV, s * 5.5); acc.y = u * 3.5;
+  fly.vel.addScaledVector(acc, dt).multiplyScalar(Math.exp(-dt * 1.6));
+  fly.pos.addScaledVector(fly.vel, dt);
+  fly.pos.set(clamp(fly.pos.x, -7, 7), clamp(fly.pos.y, MIN_Y, 4.5), clamp(fly.pos.z, -7, 7));
+  if (fly.pos.y === MIN_Y && fly.vel.y < 0) fly.vel.y = 0;
+  fly.yawRate += (y * 2.0 - fly.yawRate) * damp(6, dt);
+  fly.yaw += fly.yawRate * dt;
+  const vf = fly.vel.dot(fwdV), vr = fly.vel.dot(rightV);
+  fly.pitch += (clamp(0.3 * f + 0.05 * vf, -0.5, 0.5) - fly.pitch) * damp(5, dt);
+  fly.roll += (clamp(0.3 * s + 0.05 * vr, -0.5, 0.5) - fly.roll) * damp(5, dt);
+  const landed = fly.pos.y <= MIN_Y + 0.001 && u <= 0 && Math.abs(f) + Math.abs(s) === 0;
+  return landed ? 0.0 : clamp(0.55 + 0.12 * (Math.abs(f) + Math.abs(s)) + 0.25 * Math.max(u, 0) - 0.15 * Math.max(-u, 0), 0, 1);
+}
+
+let demoT = 0;
+const prevVel = new THREE.Vector3(), demoVel = new THREE.Vector3(), demoAcc = new THREE.Vector3(), p = new THREE.Vector3();
+function stepDemo(dt) {
+  demoT += dt;
+  const t = demoT;
+  p.set(2.6 * Math.sin(t * 0.42), 0.35 + 0.55 * Math.sin(t * 0.83 + 1), 1.9 * Math.sin(t * 0.84));
+  demoVel.subVectors(p, fly.pos).divideScalar(Math.max(dt, 1e-3));
+  demoAcc.subVectors(demoVel, prevVel).divideScalar(Math.max(dt, 1e-3));
+  prevVel.lerp(demoVel, damp(8, dt));
+  fly.pos.copy(p);
+  // heading follows travel direction, with a full pirouette every ~14 s
+  const heading = Math.atan2(prevVel.x, prevVel.z) + (Math.floor(t / 14) % 2 ? Math.min(1, (t % 14) / 3) * Math.PI * 2 : 0);
+  let dy = heading - fly.yaw; dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+  fly.yaw += dy * damp(2.5, dt);
+  fwdV.set(Math.sin(fly.yaw), 0, Math.cos(fly.yaw)); rightV.set(-Math.cos(fly.yaw), 0, Math.sin(fly.yaw));
+  const af = clamp(demoAcc.dot(fwdV), -6, 6), ar = clamp(demoAcc.dot(rightV), -6, 6);
+  fly.pitch += (clamp(0.06 * af + 0.08 * prevVel.dot(fwdV), -0.45, 0.45) - fly.pitch) * damp(4, dt);
+  fly.roll += (clamp(0.06 * ar + 0.08 * prevVel.dot(rightV), -0.45, 0.45) - fly.roll) * damp(4, dt);
+  return clamp(0.6 + 0.08 * prevVel.length() + 0.1 * Math.max(prevVel.y, 0), 0, 1);
+}
+
+// ---------------------------------------------------------------- loop
+const clock = new THREE.Clock();
+const deg = (r) => THREE.MathUtils.radToDeg(r);
+const sign = (v, w) => (v >= 0 ? '+' : '-') + Math.abs(v).toFixed(1).padStart(w, '0');
+let hudTick = 0;
+
+function resize() {
+  const w = innerWidth, h = innerHeight;
+  renderer.setSize(w, h, false); camera.aspect = w / h;
+  const narrow = w < 760;
+  camera.fov = camera.aspect < 0.8 ? 58 : 35;                     // portrait: wider lens so all 6 rotors fit
+  if (narrow) camera.setViewOffset(w, h, 0, h * 0.2, w, h);        // lift the drone above the bottom control panel
+  else camera.clearViewOffset();
+  camera.updateProjectionMatrix(); controls.handleResize();
+}
+addEventListener('resize', resize); resize();
+setMode('inspect');
+
+// ?debug → window.viewer.snap('top') jumps straight to a preset view (for checks against the reference)
+if (new URLSearchParams(location.search).has('debug')) {
+  window.viewer = {
+    drone, camera, controls, scene, renderer, setMode,
+    snap(name) {
+      const v = VIEWS[name]; setAuto(false); tween = null;
+      camera.up.set(...v.up); camera.position.copy(drone.object.position).add(new THREE.Vector3(...v.pos));
+      controls.target.copy(drone.object.position); controls.update(); renderer.render(scene, camera);
+      $('#refImg').src = v.ref; $('#refLabel').textContent = v.label;
+    },
+  };
+}
+
+renderer.setAnimationLoop(() => {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  const before = drone.object.position.clone();
+
+  let rpm = rotorsOn ? rpmSetting : 0;
+  if (mode === 'fly') { const r = stepFly(dt); rpm = rotorsOn ? r : 0; }
+  if (mode === 'demo') { const r = stepDemo(dt); rpm = rotorsOn ? r : 0; }
+  if (mode !== 'inspect') {
+    drone.object.position.copy(fly.pos);
+    drone.setAttitude(fly.pitch, fly.roll, fly.yaw);
+  }
+  drone.setRPM(rpm);
+  drone.update(dt);
+
+  // camera follows the drone while it flies
+  delta.subVectors(drone.object.position, before);
+  camera.position.add(delta); controls.target.copy(drone.object.position);
+
+  if (tween) {
+    tween.t += dt / tween.dur; const k = 1 - Math.pow(1 - Math.min(tween.t, 1), 3);
+    camera.position.lerpVectors(tween.p0, tween.p1, k); camera.up.lerpVectors(tween.u0, tween.u1, k).normalize();
+    if (tween.t >= 1) tween = null;
+  } else if (autoRotate && !userBusy && performance.now() - lastInteract > 1500) {
+    camera.position.sub(controls.target).applyAxisAngle(camera.up, dt * 0.35).add(controls.target);
+  }
+  controls.update();
+  ground.visible = camera.position.y > GROUND_Y + 0.05; // look up from below without the floor in the way
+
+  if ((hudTick += dt) > 0.1) {
+    hudTick = 0;
+    const r = drone.body.rotation;
+    $('#tmYaw').textContent = ((deg(r.y) % 360 + 360) % 360).toFixed(1).padStart(5, '0') + '°';
+    $('#tmPitch').textContent = sign(deg(r.x), 4) + '°';
+    $('#tmRoll').textContent = sign(deg(r.z), 4) + '°';
+    $('#tmAlt').textContent = Math.max(0, drone.object.position.y - MIN_Y).toFixed(2) + ' M';
+    $('#tmRpm').textContent = String(Math.round(drone.rpm * 2900)).padStart(4, '0') + ' RPM';
+  }
+  renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>

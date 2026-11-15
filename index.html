@@ -1,0 +1,679 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Project MAV-A1 · Martian Subterranean Vanguard</title>
+<link rel="icon" href="assets/img/favicon.svg" type="image/svg+xml">
+<meta name="description" content="A scroll-driven mission story: an autonomous six-rotor hexacopter maps a Martian lava tube beneath Arsia Mons. Concept mission visualization built with NASA imagery and data.">
+<link href="assets/fonts/fonts.css" rel="stylesheet">
+<style>
+:root {
+  --slate-ui: #313C4B; --void-black: #000000; --cosmic-purple: #190738; --orbital-navy: #0A2458;
+  --lidar-cyan: #00A8CC; --starlight-white: #F0F6FC; --mars-orange: #FF3305;
+  --font-header: 'Michroma', sans-serif; --font-body: 'Space Grotesk', sans-serif; --font-tech: 'Saira', sans-serif;
+  --panel: clamp(330px, 30vw, 540px);
+}
+* { box-sizing: border-box; }
+html { background: #000; }
+body { margin: 0; color: var(--starlight-white); font-family: var(--font-body); line-height: 1.6; background: #000; overflow-x: hidden; }
+a { color: var(--lidar-cyan); }
+#stage-canvas, #intro-canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+#stage-canvas { z-index: 0; } #intro-canvas { z-index: 1; pointer-events: none; }
+.tech { font-family: var(--font-tech); letter-spacing: 0.08em; font-variant-numeric: tabular-nums; }
+.cyan { color: var(--lidar-cyan); } .orange { color: var(--mars-orange); }
+h1, h2 { font-family: var(--font-header); font-weight: 400; text-transform: uppercase; letter-spacing: 0.12em; line-height: 1.32; margin: 0 0 12px; }
+h1 { font-size: clamp(19px, 1.9vw, 30px); } h2 { font-size: clamp(16px, 1.45vw, 23px); }
+.sim { display: inline-block; font-family: var(--font-tech); font-size: 10px; letter-spacing: 0.12em; padding: 0 5px; margin-left: 6px;
+  border: 1px solid var(--mars-orange); color: var(--mars-orange); border-radius: 2px; vertical-align: 2px; }
+
+/* ================= the mission panel: every word on screen lives here (30% of the width) ================= */
+.panel { position: fixed; z-index: 10; left: 0; top: 0; bottom: 0; width: var(--panel); padding: 18px 24px 16px;
+  display: grid; grid-template-rows: auto minmax(0, 1.32fr) minmax(0, 0.9fr) auto; gap: 12px; isolation: isolate;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7), 0 0 18px rgba(0, 0, 0, 0.55); }
+/* no box: a soft falloff of darkness behind the words, the scene keeps running underneath */
+.panel::before { content: ''; position: absolute; inset: 0 -14vw 0 0; z-index: -1; pointer-events: none;
+  background: linear-gradient(90deg, rgba(1, 4, 12, 0.74) 0%, rgba(1, 4, 12, 0.5) 52%, rgba(1, 4, 12, 0.16) 80%, rgba(1, 4, 12, 0) 100%); }
+.panel::after { content: ''; position: absolute; left: 0; top: 18px; bottom: 16px; width: 2px; pointer-events: none;
+  background: linear-gradient(180deg, transparent, rgba(0, 168, 204, 0.55) 30%, rgba(0, 168, 204, 0.55) 70%, transparent); }
+.head { display: grid; gap: 8px; }
+.link { font-family: var(--font-tech); font-size: 12px; letter-spacing: 0.14em; display: flex; gap: 10px; align-items: center; }
+.link-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--lidar-cyan); box-shadow: 0 0 10px var(--lidar-cyan); animation: blink 1.6s infinite; }
+.lost .link-dot { background: var(--mars-orange); box-shadow: 0 0 10px var(--mars-orange); animation-duration: 0.4s; }
+@keyframes blink { 50% { opacity: 0.25; } }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; min-height: 24px; }
+.chip { font-family: var(--font-tech); font-size: 11px; letter-spacing: 0.12em; padding: 2px 8px; border-radius: 3px; border: 1px solid var(--slate-ui);
+  color: var(--lidar-cyan); opacity: 0; transition: opacity 0.35s; }
+.chip.alert { color: var(--mars-orange); border-color: var(--mars-orange); background: rgba(255, 51, 5, 0.08); }
+.rec #present, .rec #speed, .rec #snd, .rec #hint { display: none !important; }   /* recording the backup video: no presenter controls */
+.chip.concept { color: rgba(240, 246, 252, 0.72); border-style: dashed; border-color: rgba(240, 246, 252, 0.35); }
+.tm.tau .lbl { color: #FFC23D; } .tm.tau .bar i { background: #FFC23D; }
+.region { position: relative; }
+.beat { position: absolute; inset: 0; opacity: 0; visibility: hidden; display: flex; flex-direction: column; overflow: hidden; --t: 0; --in: 1; }
+.cap .beat { justify-content: flex-end; }
+.aux .beat { justify-content: flex-start; }
+.stage-no { font-family: var(--font-tech); font-size: 11px; letter-spacing: 0.18em; color: rgba(240, 246, 252, 0.55); margin: 0 0 10px; }
+.tag { font-family: var(--font-tech); font-size: 12px; letter-spacing: 0.1em; margin: 0 0 10px; opacity: clamp(0, calc(var(--in) * 3), 1); }
+.cap .w { display: inline-block; overflow: hidden; vertical-align: bottom; padding-bottom: 0.08em; margin-bottom: -0.08em; }
+.cap .w > span { display: inline-block; transform: translateY(calc((1 - clamp(0, var(--in) * 4 - var(--wi) * 0.32, 1)) * 108%)); }
+.cap .beat::before { content: attr(data-num); position: absolute; left: -4px; top: 0; z-index: -1; pointer-events: none;
+  font-family: var(--font-header); font-size: clamp(84px, 15vh, 170px); line-height: 1; letter-spacing: 0.02em; color: transparent;
+  -webkit-text-stroke: 1px rgba(0, 168, 204, 0.32); text-shadow: none;
+  opacity: calc(var(--in) * 0.95); transform: translateY(calc((1 - var(--in)) * 26px - var(--t) * 22px)); }
+.cap .stage-no { position: relative; padding-bottom: 6px; }
+.cap .stage-no::after { content: ''; position: absolute; left: 0; bottom: 0; height: 1px; width: calc(var(--t) * 100%);
+  background: var(--lidar-cyan); box-shadow: 0 0 6px var(--lidar-cyan); }
+.cap .tag { white-space: pre-wrap; }
+.body { margin: 0; font-size: clamp(14px, 0.95vw, 16px); opacity: clamp(0, calc(var(--in) * 3 - 1.6), 1); }
+.legend { list-style: none; margin: 12px 0 0; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; font-family: var(--font-tech); font-size: 12px; letter-spacing: 0.06em; }
+.legend b { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--lidar-cyan); color: var(--lidar-cyan); font-size: 10px; margin-right: 6px; }
+.card { border: 1px solid rgba(0, 168, 204, 0.2); border-radius: 6px; padding: 12px; background: rgba(4, 12, 30, 0.58); text-shadow: none; }
+.q-blur .card { background: rgba(4, 12, 30, 0.34); -webkit-backdrop-filter: blur(10px) saturate(120%); backdrop-filter: blur(10px) saturate(120%); }
+.card h3 { font-family: var(--font-tech); font-size: 11px; font-weight: 600; letter-spacing: 0.14em; color: var(--lidar-cyan); margin: 0 0 8px; text-transform: uppercase; }
+.card p { font-size: 13px; line-height: 1.5; margin: 8px 0 0; }
+.card img { display: block; width: 100%; max-height: 17vh; object-fit: cover; border-radius: 3px; }
+.src { display: block; font-family: var(--font-tech); font-size: 10px; letter-spacing: 0.08em; color: rgba(240, 246, 252, 0.55); margin-top: 8px; }
+.feed { position: relative; overflow: hidden; border-radius: 2px; }
+.feed::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.22) 0 1px, transparent 1px 3px); }
+.feed .stamp { position: absolute; left: 6px; top: 5px; font-family: var(--font-tech); font-size: 10px; letter-spacing: 0.1em; color: var(--lidar-cyan); text-shadow: 0 0 4px #000; z-index: 1; }
+.tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; }
+.tiles div { position: relative; } .tiles img { max-height: none; }
+.ring { position: absolute; width: 34%; aspect-ratio: 1; border: 1.5px solid var(--lidar-cyan); border-radius: 50%; transform: translate(-50%, -50%) scale(calc(0.6 + var(--on) * 0.4));
+  opacity: var(--on); box-shadow: 0 0 8px rgba(0, 168, 204, 0.6); --on: clamp(0, calc(var(--t) * 9 - var(--i)), 1); }
+.zoombox { overflow: hidden; border-radius: 2px; }
+.zoombox img { transform-origin: 82% 26%; transform: scale(calc(1 + var(--t) * 2.4)); }
+.timeline { display: flex; gap: 10px; transform: translateX(calc(var(--t) * -66%)); width: 300%; }
+.timeline figure { margin: 0; width: calc(100% / 3); }
+.timeline .ph { height: 11vh; display: grid; place-items: center; background: rgba(0, 0, 0, 0.35); border-radius: 2px; overflow: hidden; }
+.timeline .ph img { width: 100%; height: 100%; object-fit: cover; max-height: none; }
+.timeline .ph img.contain { object-fit: contain; padding: 6px; }
+.timeline figcaption { font-family: var(--font-tech); font-size: 12px; letter-spacing: 0.06em; margin-top: 6px; }
+.timeline figcaption b { display: block; color: var(--lidar-cyan); font-weight: 600; }
+.clip { overflow: hidden; }
+/* process diagrams (SLAM pipeline, AI planner) */
+.steps { display: grid; gap: 6px; }
+.step { display: grid; grid-template-columns: 22px 1fr auto; gap: 10px; align-items: center; font-family: var(--font-tech); font-size: 12px; letter-spacing: 0.08em;
+  padding: 6px 8px; border: 1px solid var(--slate-ui); border-radius: 3px; --on: clamp(0, calc(var(--t) * 5 - var(--i)), 1);
+  background: rgba(0, 168, 204, calc(var(--on) * 0.12)); border-color: rgba(0, 168, 204, calc(0.25 + var(--on) * 0.6)); }
+.step i { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--lidar-cyan); background: rgba(0, 168, 204, var(--on)); justify-self: center; box-shadow: 0 0 calc(var(--on) * 10px) var(--lidar-cyan); }
+.step span:last-child { color: rgba(240, 246, 252, 0.6); }
+.net { width: 100%; height: 13vh; display: block; }
+.thermal { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.thermal .stack { position: relative; }
+.thermal .stack img { max-height: none; }
+.thermal .stack img + img { position: absolute; inset: 0; opacity: var(--t); }
+.thermal .bars { display: grid; gap: 8px; align-content: center; font-family: var(--font-tech); font-size: 11px; letter-spacing: 0.08em; }
+.thermal .bars span { display: block; height: 8px; border-radius: 2px; margin-top: 3px; }
+.clock { font-family: var(--font-tech); font-size: 20px; letter-spacing: 0.1em; }
+.pills { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.pill { font-family: var(--font-tech); font-size: 11px; letter-spacing: 0.05em; padding: 4px 10px; border-radius: 999px; }
+.pill.c { color: var(--lidar-cyan); border: 1px solid var(--lidar-cyan); } .pill.s { background: var(--slate-ui); border: 1px solid var(--slate-ui); }
+.pill.o { color: var(--mars-orange); border: 1px solid var(--mars-orange); }
+.log { font-family: var(--font-tech); font-size: 12px; letter-spacing: 0.04em; display: grid; gap: 3px; }
+.log div { opacity: clamp(0, calc(var(--t) * 7 - var(--i)), 1); }
+.plot { width: 100%; height: 86px; display: block; }
+.big { font-family: var(--font-tech); font-size: 26px; letter-spacing: 0.08em; font-variant-numeric: tabular-nums; }
+.charge { display: flex; gap: 14px; align-items: center; } .charge svg { width: 86px; height: 86px; }
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 14px; }
+.stat { border: 1px solid var(--slate-ui); border-radius: 3px; padding: 6px 8px; --on: clamp(0, calc(var(--t) * 8 - var(--i)), 1); opacity: var(--on); }
+.stat b { display: block; font-family: var(--font-tech); font-size: 16px; letter-spacing: 0.06em; color: var(--lidar-cyan); font-variant-numeric: tabular-nums; }
+.stat span { font-family: var(--font-tech); font-size: 9px; letter-spacing: 0.1em; line-height: 1.35; color: rgba(240, 246, 252, 0.6); }
+.stat .sim { font-size: 8px; padding: 0 3px; margin-left: 3px; }
+.success h1 { color: var(--starlight-white); text-shadow: 0 0 24px rgba(0, 168, 204, 0.55); }
+.m-only { display: none; }
+/* live readouts inside cards */
+.readout { display: grid; gap: 4px; font-family: var(--font-tech); }
+.readout div { display: flex; justify-content: space-between; gap: 10px; border-bottom: 1px solid rgba(240, 246, 252, 0.08); padding: 2px 0; }
+.readout span { font-size: 10px; letter-spacing: 0.12em; color: rgba(240, 246, 252, 0.55); }
+.readout b { font-size: 12px; font-weight: 600; letter-spacing: 0.08em; color: var(--lidar-cyan); font-variant-numeric: tabular-nums; }
+.spec { display: grid; grid-template-columns: 38% 1fr; gap: 10px; align-items: center; }
+.spec img { max-height: 15vh; object-fit: contain; }
+/* machine-vision window: the scene from the vehicle's camera, grayscale like a real nav cam, CV layer on top */
+.cv-box { position: fixed; z-index: 9; right: 16px; top: 166px; width: clamp(250px, 24vw, 430px); aspect-ratio: 16 / 9; border: 1px solid rgba(240, 246, 252, 0.4);
+  border-radius: 4px; overflow: hidden; pointer-events: none; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  }
+.cv-box canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.cv-head { position: absolute; left: 0; right: 0; top: 0; display: flex; justify-content: space-between; gap: 8px; padding: 5px 9px; font-family: var(--font-tech);
+  font-size: 9.5px; letter-spacing: 0.1em; color: #fff; background: linear-gradient(180deg, rgba(0, 0, 0, 0.7), rgba(0, 0, 0, 0)); white-space: nowrap; }
+.cv-head b { font-weight: 600; } .cv-head .rec { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #ff3b30; margin-right: 6px; animation: blink 1s infinite; }
+/* SLAM window (a second 3D view): graphics + a short label only */
+.slam-box { position: fixed; z-index: 9; right: 16px; bottom: 16px; width: clamp(280px, 27vw, 480px); aspect-ratio: 16 / 10; border: 1px solid rgba(0, 168, 204, 0.45);
+  border-radius: 4px; overflow: hidden; background: #03070f; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.55); pointer-events: none; }
+.slam-box canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.slam-head { position: absolute; left: 0; right: 0; top: 0; display: flex; justify-content: space-between; padding: 6px 10px; font-family: var(--font-tech);
+  font-size: 10px; letter-spacing: 0.12em; color: var(--lidar-cyan); background: linear-gradient(180deg, rgba(3, 7, 15, 0.92), rgba(3, 7, 15, 0)); }
+.slam-head .rec { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--mars-orange); margin-right: 6px; animation: blink 1s infinite; }
+.slam-scale { position: absolute; left: 10px; right: 10px; bottom: 6px; display: grid; grid-template-columns: auto 1fr auto; gap: 6px; align-items: center;
+  font-family: var(--font-tech); font-size: 9px; letter-spacing: 0.1em; color: rgba(240, 246, 252, 0.6); }
+.slam-bar { position: absolute; left: 10px; bottom: 22px; display: flex; align-items: center; gap: 6px; font-family: var(--font-tech); font-size: 9px; letter-spacing: 0.1em; color: rgba(240, 246, 252, 0.7); }
+.slam-bar i { display: block; height: 5px; width: 40px; border: 1px solid rgba(240, 246, 252, 0.7); border-top: 0; }
+.slam-scale i { height: 4px; border-radius: 2px; background: linear-gradient(90deg, #30123b, #4662d7, #36aaf9, #1ae4b6, #72fe5e, #c7ef34, #fbb938, #f56918, #c92903, #7a0403); }
+.btn { display: inline-block; font-family: var(--font-tech); font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--lidar-cyan);
+  border: 1px solid var(--lidar-cyan); padding: 8px 14px; border-radius: 3px; text-decoration: none; }
+/* footer of the panel: stage scrubber */
+.foot { display: grid; gap: 6px; }
+.profile-wrap { position: relative; height: 58px; }
+#profile { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+#profile .ground { stroke: rgba(240, 246, 252, 0.28); stroke-width: 1; stroke-dasharray: 2 3; }
+#profile .under { fill: rgba(255, 51, 5, 0.07); }
+#profile .route { fill: none; stroke: rgba(240, 246, 252, 0.22); stroke-width: 1.2; }
+#profile .done { fill: none; stroke: var(--lidar-cyan); stroke-width: 1.8; filter: drop-shadow(0 0 3px rgba(0, 168, 204, 0.9)); }
+#profile .sep { stroke: rgba(240, 246, 252, 0.12); stroke-width: 1; }
+#profile .me { fill: #fff; filter: drop-shadow(0 0 5px #00A8CC) drop-shadow(0 0 2px #00A8CC); }
+#profile .halo { fill: none; stroke: var(--lidar-cyan); stroke-width: 1; opacity: 0.6; }
+#profile text { font-family: var(--font-tech); font-size: 8.5px; letter-spacing: 0.12em; fill: rgba(240, 246, 252, 0.45); }
+.scrubber { position: absolute; inset: 0; display: grid; }
+.scrubber button { all: unset; cursor: pointer; height: 100%; border-radius: 3px; }
+.scrubber button:hover { background: rgba(0, 168, 204, 0.08); }
+.scrubber button.on { background: linear-gradient(180deg, transparent, rgba(0, 168, 204, 0.1)); }
+.scrubber button.alert { background: linear-gradient(180deg, transparent, rgba(255, 51, 5, 0.16)); }
+.scrubber button:focus-visible { outline: 2px solid var(--lidar-cyan); outline-offset: 2px; }
+/* sound toggle */
+.snd { all: unset; cursor: pointer; display: inline-flex; gap: 8px; align-items: center; font-family: var(--font-tech); font-size: 11px; letter-spacing: 0.14em;
+  color: rgba(240, 246, 252, 0.7); padding: 3px 9px; border: 1px solid rgba(240, 246, 252, 0.22); border-radius: 999px; pointer-events: auto; width: max-content; }
+.snd:hover, .snd[aria-pressed="true"] { color: var(--lidar-cyan); border-color: rgba(0, 168, 204, 0.6); }
+.snd .eq { display: inline-flex; gap: 2px; align-items: flex-end; height: 10px; }
+.snd .eq i { width: 2px; height: 3px; background: currentColor; border-radius: 1px; }
+.snd[aria-pressed="true"] .eq i { animation: eq 0.9s ease-in-out infinite; }
+.snd[aria-pressed="true"] .eq i:nth-child(2) { animation-delay: -0.3s; } .snd[aria-pressed="true"] .eq i:nth-child(3) { animation-delay: -0.6s; }
+@keyframes eq { 0%, 100% { height: 3px; } 50% { height: 10px; } }
+.snd:focus-visible { outline: 2px solid var(--lidar-cyan); outline-offset: 2px; }
+.snd .play { width: 0; height: 0; border-left: 7px solid currentColor; border-top: 4.5px solid transparent; border-bottom: 4.5px solid transparent; }
+#present[aria-pressed="true"] .play { width: 7px; height: 9px; border: 0; border-left: 2.5px solid currentColor; border-right: 2.5px solid currentColor; }
+#present.paused .play { width: 0; height: 0; border-right: 0; border-left: 7px solid currentColor; border-top: 4.5px solid transparent; border-bottom: 4.5px solid transparent; }
+.foot .tech #hint { flex: 1; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.foot .tech #stage-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.head { position: relative; }
+.head-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.head-row .link { flex: 1 1 auto; min-width: 0; }
+.link-txt { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pres { display: flex; gap: 6px; flex: none; }
+.snd.speed { min-width: 32px; justify-content: center; color: var(--starlight-white); border-color: rgba(0, 168, 204, 0.6); }
+.snd.speed:hover { background: rgba(0, 168, 204, 0.2); }
+.snd.present { color: var(--starlight-white); border-color: rgba(0, 168, 204, 0.6); background: rgba(0, 168, 204, 0.12); }
+.snd.present:hover, .snd.present[aria-pressed="true"] { background: rgba(0, 168, 204, 0.25); color: #fff; }
+.tm.eta .lbl { color: #3CFF9E; } .tm.eta .bar i { background: #3CFF9E; } .tm.eta.done #eta-val { color: #3CFF9E; }
+.foot .tech { font-size: 11px; display: flex; justify-content: space-between; align-items: center; gap: 8px; color: rgba(240, 246, 252, 0.6); }
+
+/* ================= HUD (numbers only) ================= */
+.hud-tr { position: fixed; z-index: 20; top: 16px; right: 16px; padding: 10px 14px; width: 262px; display: grid; gap: 6px; pointer-events: none;
+  font-family: var(--font-tech); font-size: 12px; letter-spacing: 0.08em; font-variant-numeric: tabular-nums;
+  background: rgba(6, 16, 42, 0.78); border: 1px solid var(--slate-ui); border-radius: 4px; }
+.q-blur .hud-tr { background: rgba(6, 16, 42, 0.6); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+.tm { display: grid; grid-template-columns: 70px 1fr auto; gap: 8px; align-items: center; }
+.tm .lbl { color: var(--lidar-cyan); }
+.tm.rad { grid-template-columns: 70px 1fr auto; } .tm.rad span:last-child { text-align: right; white-space: nowrap; }
+.bar i.hi { background: var(--mars-orange); } .bar i.mid { background: #FFC23D; } .bar i.lo { background: #3CFF9E; }
+.rad-note { font-size: 9.5px; letter-spacing: 0.1em; color: rgba(240, 246, 252, 0.6); text-align: right; margin-top: -2px; }
+.rad-note .sim { font-size: 8px; padding: 0 3px; margin-left: 4px; }
+.bar { height: 6px; background: rgba(240, 246, 252, 0.08); border: 1px solid var(--slate-ui); border-radius: 2px; overflow: hidden; }
+.bar i { display: block; height: 100%; width: 100%; background: var(--lidar-cyan); transform-origin: left; }
+.bar i.low { background: var(--mars-orange); }
+
+/* ================= scene overlays (graphics, no text) ================= */
+.fx { position: fixed; inset: 0; pointer-events: none; opacity: 0; z-index: 5; }
+#fx-flash { background: #fff; z-index: 6; }
+#fx-black { background: #000; }
+#fx-heat { background: radial-gradient(120% 90% at 65% 50%, transparent 45%, rgba(255, 51, 5, 0.55) 80%, rgba(255, 120, 40, 0.85) 100%); mix-blend-mode: screen; }
+#fx-static { background-image: repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.06) 0 1px, transparent 1px 2px), repeating-linear-gradient(90deg, rgba(255, 51, 5, 0.05) 0 2px, transparent 2px 5px); }
+#fx-vignette { opacity: 1; background: radial-gradient(120% 100% at 65% 50%, transparent 58%, rgba(0, 0, 0, 0.5) 100%); z-index: 4; }
+.overlay-svg { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 8; pointer-events: none; overflow: visible; }
+.overlay-svg text { font-family: var(--font-tech); font-size: 11px; font-weight: 600; fill: #fff; text-anchor: middle; dominant-baseline: central; }
+
+#story { position: relative; z-index: 2; height: 1410vh; pointer-events: none; }
+#story section { position: absolute; left: 0; width: 1px; overflow: hidden; clip-path: inset(50%); }
+footer { position: relative; z-index: 12; background: #000; padding: 72px clamp(16px, 6vw, 96px) 64px calc(var(--panel) + clamp(16px, 4vw, 64px)); border-top: 1px solid var(--slate-ui); }
+footer .wrap { max-width: 1100px; display: grid; gap: 28px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+footer h2 { font-size: 15px; }
+footer ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; font-size: 14px; }
+footer li span { display: block; font-family: var(--font-tech); font-size: 11px; letter-spacing: 0.08em; color: rgba(240, 246, 252, 0.6); }
+footer .disclaimer { grid-column: 1 / -1; font-family: var(--font-tech); font-size: 12px; letter-spacing: 0.06em; color: rgba(240, 246, 252, 0.7); border-top: 1px solid var(--slate-ui); padding-top: 18px; }
+footer .rights { grid-column: 1 / -1; margin: -14px 0 0; font-family: var(--font-tech); font-size: 11px; letter-spacing: 0.18em; color: var(--lidar-cyan); }
+
+#loader { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: #000; transition: opacity 0.6s; }
+#loader .box { width: min(420px, calc(100vw - 32px)); padding: 20px; border: 1px solid var(--slate-ui); border-radius: 4px; background: rgba(6, 16, 42, 0.8); }
+#loader .bar { margin-top: 12px; height: 4px; } #loader .bar i { transform: scaleX(0); }
+
+/* ================= phones: the panel becomes the bottom 38% ================= */
+@media (max-width: 760px) {
+  .panel { top: auto; right: 0; width: auto; height: 40vh; padding: 12px 14px 10px; grid-template-rows: auto minmax(0, 1fr) auto; gap: 8px; }
+  .panel::before { inset: -10vh 0 0 0; background: linear-gradient(180deg, rgba(1, 4, 12, 0) 0%, rgba(1, 4, 12, 0.72) 26%, rgba(1, 4, 12, 0.9) 100%); }
+  .panel::after { display: none; }
+  .cap .beat::before { font-size: 64px; left: auto; right: 0; }
+  .profile-wrap { height: 40px; }
+  .aux { display: none; }
+  .link { font-size: 10px; } .stage-no { margin-bottom: 4px; } .legend { display: none; }
+  h1 { font-size: 16px; } h2 { font-size: 15px; margin-bottom: 6px; } .body { font-size: 13.5px; line-height: 1.5; }
+  .cap .beat { justify-content: flex-start; overflow-y: auto; }
+  .m-only { display: grid; }
+  .slam-box { top: 62px; bottom: auto; right: 10px; width: 48vw; }
+  .cv-box { top: 62px; right: 10px; width: 58vw; }
+  .cv-head { font-size: 8px; padding: 4px 6px; } .cv-head > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } #cv-meta { display: none; } .stats { grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 10px; } .stat { padding: 5px 7px; } .stat b { font-size: 15px; } .stat span { font-size: 9px; }
+  .hud-tr { top: 10px; right: 10px; left: 10px; width: auto; grid-template-columns: repeat(4, 1fr); gap: 6px; padding: 6px 10px; font-size: 10px; }
+  .tm.rad { grid-template-columns: 1fr; } .tm.rad span:last-child { text-align: left; } .rad-note { display: none; }
+  .tm { grid-template-columns: 1fr; gap: 0; } .tm .bar { display: none; }
+  footer { padding-left: 16px; }
+}
+@media (prefers-reduced-motion: reduce) { .link-dot { animation: none; } }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "./vendor/three/build/three.module.js",
+  "three/addons/": "./vendor/three/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<canvas id="stage-canvas" aria-hidden="true"></canvas>
+<canvas id="intro-canvas" aria-hidden="true"></canvas>
+<div class="fx" id="fx-vignette"></div>
+<div class="fx" id="fx-heat"></div><div class="fx" id="fx-static"></div>
+<div class="fx" id="fx-black"></div><div class="fx" id="fx-flash"></div>
+
+<!-- graphics drawn over the scene (no words: all text is in the panel) -->
+<svg class="overlay-svg" id="reticle" aria-hidden="true" style="opacity:0">
+  <g id="reticle-g"><g id="reticle-ring">
+    <circle r="46" fill="none" stroke="#00A8CC" stroke-width="1.5" stroke-dasharray="6 5" vector-effect="non-scaling-stroke"/>
+    <circle r="30" fill="none" stroke="#00A8CC" stroke-width="1" vector-effect="non-scaling-stroke"/>
+    <path d="M-64 0h12M52 0h12M0 -64v12M0 52v12" stroke="#00A8CC" stroke-width="2" vector-effect="non-scaling-stroke"/>
+  </g></g>
+</svg>
+<svg class="overlay-svg" id="callouts" aria-hidden="true" style="opacity:0"></svg>
+
+<div id="qtoast" aria-live="polite" style="position:fixed;z-index:40;left:50%;bottom:64px;transform:translateX(-50%);font:600 11px var(--font-tech);letter-spacing:.16em;color:#F0F6FC;background:rgba(10,14,20,.8);border:1px solid rgba(0,168,204,.6);border-radius:3px;padding:5px 10px;opacity:0;transition:opacity .3s;pointer-events:none"></div>
+<div class="hud-tr" aria-live="off">
+  <div class="tm"><span class="lbl" id="alt-lbl">ALTITUDE</span><span class="bar" aria-hidden="true"><i id="alt-bar"></i></span><span id="alt-val">400.0 KM</span></div>
+  <div class="tm"><span class="lbl">RSSI</span><span class="bar" aria-hidden="true"><i id="rssi-bar"></i></span><span id="rssi-val">100%</span></div>
+  <div class="tm"><span class="lbl">BATTERY</span><span class="bar" aria-hidden="true"><i id="bat-bar"></i></span><span id="bat-val">100%</span></div>
+  <div class="tm rad"><span class="lbl">RADIATION</span><span class="bar" aria-hidden="true"><i id="rad-bar" class="hi"></i></span><span id="rad-val">1.80 mSv/d</span></div>
+  <div class="rad-note"><span id="rad-note">INTERPLANETARY CRUISE</span> <span class="sim">SIM</span></div>
+  <div class="tm tau" id="tau-row" style="display:none"><span class="lbl">DUST τ</span><span class="bar" aria-hidden="true"><i id="tau-bar"></i></span><span id="tau-val">0.6</span></div>
+  <div class="tm eta" id="eta-row" style="display:none"><span class="lbl">TO EARTH</span><span class="bar" aria-hidden="true"><i id="eta-bar"></i></span><span id="eta-val">12:40</span></div>
+</div>
+
+<div class="cv-box" id="cv-box" aria-hidden="true" style="opacity:0">
+  <canvas id="cv-canvas"></canvas>
+  <div class="cv-head"><span><i class="rec"></i><b id="cv-title">NAV CAM</b></span><span id="cv-meta"></span></div>
+</div>
+<div class="slam-box" id="slam-box" aria-hidden="true" style="opacity:0">
+  <canvas id="slam-canvas"></canvas>
+  <div class="slam-head"><span><i class="rec"></i>SLAM · LIVE 3D MAP</span><span id="slam-pts">0 PTS</span></div>
+  <div class="slam-bar"><i></i><span>10 M</span></div>
+  <div class="slam-scale"><span>FLOOR</span><i></i><span>ROOF</span></div>
+</div>
+
+<aside class="panel" id="panel" aria-label="Mission log">
+  <div class="head">
+    <div class="head-row">
+      <div class="link" id="hud-link"><span class="link-dot"></span><span class="link-txt">PROJECT MAV-A1 // TELEMETRY LINK</span></div>
+      <div class="pres">
+        <button class="snd speed" id="speed" type="button" title="PRESENT speed: click to change (↑/↓ while playing)"><span id="speed-lbl">2×</span></button>
+        <button class="snd present" id="present" type="button" aria-pressed="false" title="Play the whole story like a film (Space pause · ←/→ stage · ↑/↓ speed · Esc stop)"><span class="play" aria-hidden="true"></span><span id="present-lbl">PRESENT</span></button>
+      </div>
+    </div>
+    <div class="chips"><span class="chip" id="loc"></span><span class="chip alert" id="hud-alert"></span><span class="chip concept" id="concept-chip"></span></div>
+  </div>
+
+  <!-- ===================== captions: one per shot ===================== -->
+  <div class="region cap">
+    <article class="beat" data-s="1" data-t0="0" data-t1="0.64">
+      <p class="stage-no">STAGE 01 / 10 · ORBITAL APPROACH</p>
+      <p class="tag cyan">MARS APPROACH // TARGET: THARSIS CAVE CANDIDATES</p>
+      <h1>PROJECT MAV-A1 // MARTIAN SUBTERRANEAN VANGUARD</h1>
+      <p class="body">Cosmic radiation (≈0.67 mSv a day at the surface, measured by Curiosity's RAD) and micrometeorites make the Martian surface a hard place to stay for long. Beneath the basaltic crust there may be lava tubes: natural shelters no one has ever looked inside.</p>
+    </article>
+    <article class="beat" data-s="1" data-t0="0.64" data-t1="1">
+      <p class="stage-no">STAGE 01 / 10 · ORBITAL APPROACH</p>
+      <p class="tag cyan">MOLA ELEVATION // MARS GLOBAL SURVEYOR</p>
+      <h2>TARGETING THE THARSIS RISE</h2>
+      <p class="body">Laser altimetry reveals the giant volcanoes of Tharsis. Chains of collapse pits on their flanks suggest lava tubes below, possibly large enough to shelter a future base.</p>
+      <span class="src">DATA: NASA/JPL · PIA02820</span>
+    </article>
+    <article class="beat" data-s="2" data-t0="0" data-t1="0.42">
+      <p class="stage-no">STAGE 02 / 10 · ENTRY &amp; LANDING</p>
+      <p class="tag orange">ENTRY INTERFACE // ATMOS_DENSITY: 0.020 KG/M³</p>
+      <h2>ATMOSPHERIC ENTRY</h2>
+      <p class="body">Sealed in its aeroshell, the lander plunges into an atmosphere about 1% as dense as Earth's; Olympus Mons slides past on the approach to Arsia Mons.</p>
+    </article>
+    <article class="beat" data-s="2" data-t0="0.42" data-t1="1">
+      <p class="stage-no">STAGE 02 / 10 · ENTRY &amp; LANDING</p>
+      <p class="tag orange">ATMOS_DENSITY: 0.020 KG/M³ // LANDER LOCK CONFIRMED</p>
+      <h2>SURFACE DEPLOYMENT SEQUENCE</h2>
+      <p class="body">The lander sets down at the edge of a volcanic skylight with MAV-A1 sealed inside its dust-proof hangar. It becomes the base station: power, radio relay and shelter.</p>
+    </article>
+    <article class="beat" data-s="3" data-t0="0" data-t1="0.32">
+      <p class="stage-no">STAGE 03 / 10 · MAV-A1 LAUNCH</p>
+      <p class="tag cyan">HANGAR DOORS OPEN // PAD LIFT ↑ // ROTORS SPIN-UP</p>
+      <h2>OUT OF THE HANGAR</h2>
+      <p class="body">Two clamshell doors swing open on their actuators, the pad lift raises MAV-A1 to the rim of the hangar, and the six rotors spin up for lift-off.</p>
+    </article>
+    <article class="beat" data-s="3" data-t0="0.32" data-t1="0.55">
+      <p class="stage-no">STAGE 03 / 10 · MAV-A1 LAUNCH</p>
+      <p class="tag cyan">PROPULSION: 6 MOTORS × 6-BLADE ROTORS // HIGH-SOLIDITY THIN-AIR DESIGN</p>
+      <h2>SIX-ROTOR AERODYNAMIC ARCHITECTURE</h2>
+      <p class="body">Engineered for Mars's 1% atmospheric density, MAV-A1 drives six high-solidity, six-blade rotors on ultra-lightweight composite arms—generating stable lift where thin CO₂ air and a low speed of sound cap rotor tip speed.</p>
+      <ul class="legend"><li><b>1</b>3D LiDAR</li><li><b>2</b>6-blade rotor ×6</li><li><b>3</b>Stereo camera</li><li><b>4</b>Node dispenser</li><li><b>5</b>Angled gear</li></ul>
+    </article>
+    <article class="beat" data-s="3" data-t0="0.55" data-t1="1">
+      <p class="stage-no">STAGE 03 / 10 · MAV-A1 LAUNCH</p>
+      <p class="tag cyan">NAV: PIT RIM // LiDAR ONLINE</p>
+      <h2>EN ROUTE TO THE SKYLIGHT</h2>
+      <p class="body">MAV-A1 rose out of the hangar already facing the pit. It tilts forward and covers the short hop to the rim at low altitude, scanning the ground as it goes.</p>
+    </article>
+    <article class="beat" data-s="4" data-t0="0" data-t1="0.44">
+      <p class="stage-no">STAGE 04 / 10 · SKYLIGHT DESCENT</p>
+      <p class="tag cyan">HiRISE PSP_003647_1745 // TARGET LOCK</p>
+      <h2>TARGET ACQUIRED</h2>
+      <p class="body">Over the pit, MAV-A1 matches its downward view to the HiRISE image of this exact hole: 150 × 157 m across and at least 178 m deep, its floor never seen from orbit. Does it open into a cave? That is what MAV-A1 is built to find out.</p>
+    </article>
+    <article class="beat" data-s="4" data-t0="0.44" data-t1="1">
+      <p class="stage-no">STAGE 04 / 10 · SKYLIGHT DESCENT</p>
+      <p class="tag orange">BELOW THE RIM // SUNLIGHT &amp; ORBITER LINK LOST</p>
+      <h2>SUBTERRANEAN PIT INGRESS</h2>
+      <p class="body">From the sunlit rim into darkness. Below the rim no orbiter can hear the drone, so it flies fully autonomously, sidestepping blocks of collapsed roof jammed in the shaft.</p>
+    </article>
+    <article class="beat" data-s="5" data-t0="0" data-t1="1">
+      <p class="stage-no">STAGE 05 / 10 · LiDAR-SLAM MAPPING</p>
+      <p class="tag cyan">OCTOMAP ACTIVE</p>
+      <h2>REAL-TIME 3D LiDAR-SLAM MAPPING</h2>
+      <p class="body">Here the shaft is modelled opening into a lava tube. Sweeping it with low-power solid-state laser pulses, MAV-A1 builds centimetre-level 3D OctoMaps in total darkness.</p>
+    </article>
+    <article class="beat" data-s="6" data-t0="0" data-t1="0.56">
+      <p class="stage-no">STAGE 06 / 10 · AUTONOMOUS NAVIGATION</p>
+      <p class="tag cyan">NEURAL PATHFINDING // ZERO-HUMAN-INTERVENTION</p>
+      <h2>VANGUARD-AI LEVEL-4 AUTONOMY</h2>
+      <p class="body">Powered by onboard <b>VANGUARD-AI</b> spatial intelligence, the hexacopter evaluates subterranean geometry in milliseconds—autonomously negotiating narrow choke points and rockfall hazards.</p>
+    </article>
+    <article class="beat" data-s="6" data-t0="0.56" data-t1="1">
+      <p class="stage-no">STAGE 06 / 10 · AUTONOMOUS NAVIGATION</p>
+      <p class="tag orange">MOTOR 3 FAULT // RE-TRIM ACTIVE</p>
+      <h2>ROTOR-OUT TOLERANCE</h2>
+      <p class="body">Six rotors keep the vehicle controllable with one motor out. VANGUARD-AI re-trims the remaining five and keeps flying.</p>
+      <span class="src">FAULT TOLERANCE CITED FOR NASA'S MARS SCIENCE HELICOPTER CONCEPT (IEEE SPECTRUM)</span>
+    </article>
+    <article class="beat" data-s="7" data-t0="0" data-t1="0.333">
+      <p class="stage-no">STAGE 07 / 10 · BREADCRUMB NETWORK</p>
+      <p class="tag orange">[WARNING] SURFACE LOS LOST · BASALT ATTENUATION DETECTED</p>
+      <h2>BREADCRUMB RELAY NETWORK</h2>
+      <p class="body">Deep inside Martian lava tubes, solid basalt blocks all orbital radio links. <b>MAV-A1</b> builds its own subterranean lifeline.</p>
+    </article>
+    <article class="beat" data-s="7" data-t0="0.333" data-t1="0.667">
+      <p class="stage-no">STAGE 07 / 10 · BREADCRUMB NETWORK</p>
+      <p class="tag cyan">RSSI THRESHOLD REACHED // DEPLOYING RELAY NODE_04</p>
+      <h2>SELF-HEALING MULTI-HOP MESH</h2>
+      <p class="body">At calculated signal-decay points, the hexacopter drops micro-transceiver nodes, forming an unbroken underground data bridge back to the lander.</p>
+    </article>
+    <article class="beat" data-s="7" data-t0="0.667" data-t1="1">
+      <p class="stage-no">STAGE 07 / 10 · BREADCRUMB NETWORK</p>
+      <p class="tag cyan">VANGUARD-AI LINK RECOVERY ACTIVE // OCTOMAP VECTOR LOCKED</p>
+      <h2>ZERO-LOSS SIGNAL RECOVERY</h2>
+      <p class="body">If deep-cave interference severs the link, <b>VANGUARD-AI</b> fuses live <b>3D LiDAR-SLAM</b> maps with breadcrumb coordinates to autonomously backtrack until telemetry is restored.</p>
+    </article>
+    <article class="beat" data-s="8" data-t0="0" data-t1="0.44">
+      <p class="stage-no">STAGE 08 / 10 · HABITAT ANALYSIS</p>
+      <p class="tag cyan">CEILING INTEGRITY: STABLE // RADIATION SHIELDING: 99.4% <span class="sim">SIM</span></p>
+      <h2>HABITAT SITE QUALIFICATION</h2>
+      <p class="body">By analyzing structural arch stability and subterranean volatiles, MAV-A1 identifies secure, radiation-shielded zones capable of housing future human research outposts.</p>
+    </article>
+    <article class="beat" data-s="8" data-t0="0.44" data-t1="1">
+      <p class="stage-no">STAGE 08 / 10 · HABITAT ANALYSIS</p>
+      <p class="tag cyan">CONCEPT // FUTURE OUTPOST · DRAWN AT REAL SCALE</p>
+      <h2>A HOME UNDER THE BASALT</h2>
+      <p class="body">Where the map shows a stable roof, a flat floor and possibly ice nearby, a future crew could inflate their habitats, shielded by metres of rock from radiation and micrometeorites.</p>
+    </article>
+    <article class="beat" data-s="9" data-t0="0" data-t1="0.5">
+      <p class="stage-no">STAGE 09 / 10 · RETURN &amp; RECHARGE</p>
+      <p class="tag cyan">VANGUARD-AI // RETURN VECTOR LOCKED</p>
+      <h2>AUTONOMOUS RETURN</h2>
+      <p class="body">Following its own OctoMap and the breadcrumb chain, MAV-A1 turns back once, flies to the skylight and climbs into the evening light.</p>
+    </article>
+    <article class="beat" data-s="9" data-t0="0.5" data-t1="1">
+      <p class="stage-no">STAGE 09 / 10 · RETURN &amp; RECHARGE</p>
+      <p class="tag cyan">DUST OPACITY RISING // RETURN TO HANGAR</p>
+      <h2>HOME BEFORE THE DUST</h2>
+      <p class="body">A dust storm is thickening the air (optical depth τ rising): less sunlight for the lander's arrays, more grit on everything. In 2018 a planet-wide storm (τ ≈ 10.8) silenced the Opportunity rover for good. MAV-A1 lands on the raised pad, the lift lowers it into the hangar and the doors seal; it charges through an induction coil, with no exposed contacts.</p>
+    </article>
+    <article class="beat success" data-s="10" data-t0="0" data-t1="0.72">
+      <p class="stage-no">STAGE 10 / 10 · MISSION COMPLETE</p>
+      <p class="tag cyan">ALL MISSION OBJECTIVES COMPLETE</p>
+      <h1>MISSION SUCCESSFUL</h1>
+      <p class="body">MAV-A1 is sealed in its hangar, recharging. Above the blue Martian sunset, the bright point is Earth; the lava-tube map and a qualified habitat site are on their way there.</p>
+      <div class="stats m-only">
+        <div class="stat" style="--i:0"><b>262 M</b><span>LAVA TUBE MAPPED <span class="sim">SIM</span></span></div>
+        <div class="stat" style="--i:1"><b>1.24 M</b><span>LiDAR POINTS <span class="sim">SIM</span></span></div>
+        <div class="stat" style="--i:2"><b>4</b><span>RELAY NODES DEPLOYED</span></div>
+        <div class="stat" style="--i:3"><b>1</b><span>HABITAT ZONE QUALIFIED</span></div>
+        <div class="stat" style="--i:4"><b>100%</b><span>BATTERY · DOCKED</span></div>
+        <div class="stat" style="--i:5"><b>MRO</b><span>MAP UPLINK RELAY</span></div>
+      </div>
+    </article>
+    <article class="beat" data-s="10" data-t0="0.74" data-t1="1">
+      <p class="stage-no">EPILOGUE</p>
+      <p class="tag cyan">CONCEPT // A FUTURE NIGHT ON ARSIA MONS</p>
+      <h2>A LIGHT UNDER ARSIA MONS</h2>
+      <p class="body">One day, the map MAV-A1 made could guide the first crew down this skylight, to live under the basalt, out of reach of the radiation above.</p>
+    </article>
+  </div>
+
+  <!-- ===================== supporting cards and process animations ===================== -->
+  <div class="region aux">
+    <section class="beat" data-s="2" data-t0="0.02" data-t1="0.42"><div class="card">
+      <h3>Entry physics // live <span class="sim">SIM</span></h3>
+      <div class="readout">
+        <div><span>VELOCITY</span><b id="edl-v">5.60 KM/S</b></div>
+        <div><span>DECELERATION</span><b id="edl-g">0.4 g</b></div>
+        <div><span>HEAT SHIELD</span><b id="edl-q">40 °C</b></div>
+      </div>
+      <p>Mars's air is ~1% as dense as Earth's, so the lander sheds most of its speed late and low. Surface gravity is 3.71 m/s² (38% of Earth's).</p>
+    </div></section>
+    <section class="beat" data-s="4" data-t0="0.02" data-t1="0.44"><div class="card">
+      <h3>Mars Odyssey THEMIS // skylight candidates</h3>
+      <div class="tiles">
+        <div><img src="assets/nasa/nasa-pia09929-tile-1.webp" alt="THEMIS tile with a dark skylight"><span class="ring" style="--i:0;left:50%;top:51%"></span></div>
+        <div><img src="assets/nasa/nasa-pia09929-tile-2.webp" alt="THEMIS tile with a dark skylight"><span class="ring" style="--i:1;left:50%;top:50%"></span></div>
+        <div><img src="assets/nasa/nasa-pia09929-tile-3.webp" alt="THEMIS tile with a dark skylight"><span class="ring" style="--i:2;left:46%;top:50%"></span></div>
+        <div><img src="assets/nasa/nasa-pia09929-tile-4.webp" alt="THEMIS tile with a dark skylight"><span class="ring" style="--i:3;left:52%;top:50%"></span></div>
+        <div><img src="assets/nasa/nasa-pia09929-tile-5.webp" alt="THEMIS tile with two dark skylights"><span class="ring" style="--i:4;left:36%;top:54%;width:24%"></span><span class="ring" style="--i:5;left:59%;top:44%;width:24%"></span></div>
+        <div><img src="assets/nasa/nasa-pia09929-tile-6.webp" alt="THEMIS tile with a dark skylight"><span class="ring" style="--i:6;left:47%;top:52%"></span></div>
+      </div>
+      <p>Seven possible cave skylights on Arsia Mons, about 100–250 m across.</p>
+      <span class="src">SOURCE: NASA/JPL-Caltech/ASU/USGS · PIA09929 · Cushing et al. 2007</span>
+    </div></section>
+    <section class="beat" data-s="2" data-t0="0.45" data-t1="1"><div class="card">
+      <h3>Hazard detection // descent camera</h3>
+      <div class="steps">
+        <div class="step" style="--i:0"><i></i><span>GROUND SPLIT INTO 2.5 M CELLS</span><span>529</span></div>
+        <div class="step" style="--i:1"><i></i><span>ROCKS · SLOPE · PIT SCORED</span><span class="orange">RED = NO-GO</span></div>
+        <div class="step" style="--i:2"><i></i><span>SAFEST CELL BESIDE THE SKYLIGHT</span><span class="cyan">LOCKED</span></div>
+      </div>
+      <p>The camera window shows what the lander sees as it comes down: the map it builds and the cell it chooses.</p>
+    </div></section>
+    <section class="beat" data-s="3" data-t0="0.08" data-t1="0.45"><div class="card">
+      <h3>MAV-A1 // vehicle sheet <span class="sim">SIM</span></h3>
+      <div class="spec">
+        <img src="assets/img/mav-a1-top.webp" alt="MAV-A1 seen from above: six arms, one six-blade rotor on each">
+        <div class="readout">
+          <div><span>ROTORS</span><b>6 × 6 BLADES</b></div>
+          <div><span>TIP MACH LIMIT</span><b>0.7</b></div>
+          <div><span>SENSORS</span><b>LiDAR · STEREO · IMU</b></div>
+          <div><span>ENDURANCE</span><b>~7 MIN / SORTIE</b></div>
+        </div>
+      </div>
+      <span class="src">FOR SCALE: NASA'S 31 KG MARS SCIENCE HELICOPTER CONCEPT · 6.5–10 MIN HOVER (NTRS 2020; DELAUNE ET AL. 2022)</span>
+    </div></section>
+    <section class="beat" data-s="3" data-t0="0.45" data-t1="1"><div class="card">
+      <h3>Design rationale</h3>
+      <p style="margin-top:0">Mars's thin CO₂ atmosphere (≈0.020 kg/m³) and low speed of sound (≈240 m/s) cap how fast a rotor tip can spin. Six-blade, high-solidity rotors recover thrust within that limit.</p>
+      <span class="src">MAV-A1 DESIGN RATIONALE · NOT A NASA CLAIM</span>
+    </div></section>
+    <section class="beat" data-s="4" data-t0="0.46" data-t1="1"><div class="card">
+      <h3>Real size vs. this 3D view</h3>
+      <p style="margin-top:0">The real pit is 150 × 157 m across and at least 178 m deep (measured from the rim's shadow). HiRISE stereo suggests a vertical shaft, like Hawaiian pit craters. Here it is drawn about 10× smaller so the 2.8 m drone stays visible: artist's concept, not to scale.</p>
+      <span class="src">HiRISE PSP_003647_1745 · PSP_004847_1745 · NASA/JPL-CALTECH/UARIZONA</span>
+    </div></section>
+    <section class="beat" data-s="5" data-t0="0.02" data-t1="1"><div class="card">
+      <h3>SLAM pipeline // live</h3>
+      <div class="steps">
+        <div class="step" style="--i:0"><i></i><span>LiDAR SWEEP · 3 SCAN RINGS</span><span>10 HZ</span></div>
+        <div class="step" style="--i:1"><i></i><span>POINT CLOUD</span><span id="pt-count">0</span></div>
+        <div class="step" style="--i:2"><i></i><span>SCAN MATCHING · POSE GRAPH</span><span>±2 CM</span></div>
+        <div class="step" style="--i:3"><i></i><span>OCTOMAP VOXELS</span><span>5 CM</span></div>
+      </div>
+      <p>32 laser channels paint the walls (colour = range). Every return is added to the map in the SLAM window: colour = height, white line = pose graph.</p>
+      <span class="src">POINT COUNT AND VOXEL SIZE ARE SIMULATED</span>
+    </div></section>
+    <section class="beat" data-s="6" data-t0="0.02" data-t1="0.56"><div class="card">
+      <h3>VANGUARD-AI // trajectory planner</h3>
+      <svg class="net" id="ai-net" viewBox="0 0 300 100" aria-label="Neural planner activity"></svg>
+      <div class="steps" style="margin-top:6px">
+        <div class="step" style="--i:0"><i></i><span>9 CANDIDATE PATHS</span><span>EVERY 50 MS</span></div>
+        <div class="step" style="--i:1"><i></i><span>COLLISION CHECK VS. OCTOMAP</span><span class="orange">REJECT</span></div>
+        <div class="step" style="--i:2"><i></i><span>CHOSEN PATH</span><span class="cyan">CYAN</span></div>
+      </div>
+    </div></section>
+    <section class="beat" data-s="6" data-t0="0.56" data-t1="1"><div class="card">
+      <h3>Decision log</h3>
+      <div class="log">
+        <div style="--i:0">T+0421 · MOTOR 3 CURRENT SPIKE</div>
+        <div class="orange" style="--i:1">T+0422 · MOTOR 3 OFFLINE</div>
+        <div style="--i:2">T+0422 · RE-TRIM 5 ROTORS · YAW HOLD</div>
+        <div style="--i:3">T+0423 · ALTITUDE STABLE · CONTINUE</div>
+      </div>
+    </div></section>
+    <section class="beat" data-s="7" data-t0="0" data-t1="0.667"><div class="card">
+      <h3>RSSI // link to lander</h3>
+      <svg class="plot" viewBox="0 0 300 90" aria-label="Signal strength over the breadcrumb sequence">
+        <line x1="0" y1="72" x2="300" y2="72" stroke="#FF3305" stroke-dasharray="4 4" stroke-width="1"/>
+        <polyline id="rssi-plot" fill="none" stroke="#00A8CC" stroke-width="2"/>
+      </svg>
+      <div class="pills"><span class="pill c">Multi-hop mesh</span><span class="pill s">Drop on SNR/RSSI decay</span><span class="pill o">SLAM backtrack fail-safe</span></div>
+    </div></section>
+    <section class="beat" data-s="7" data-t0="0.667" data-t1="1"><div class="card">
+      <h3>Earth heritage // NASA JPL Team CoSTAR</h3>
+      <p style="margin-top:0">Breadcrumb radio nodes were field-proven on Earth by NASA JPL's Team CoSTAR in the DARPA Subterranean Challenge (2nd Tunnel 2019, 1st Urban 2020), including tests in Martian-analog lava tubes.</p>
+      <span class="src">SOURCE: NASA/JPL · NeBula (arXiv 2103.11470)</span>
+    </div></section>
+    <section class="beat" data-s="8" data-t0="0.03" data-t1="0.44"><div class="card">
+      <h3>THEMIS thermal // day → pre-dawn</h3>
+      <div class="thermal">
+        <div class="stack feed"><img src="assets/nasa/nasa-pia09930-day-thermal.webp" alt="Daytime thermal image: the skylight is cooler than its surroundings"><img src="assets/nasa/nasa-pia09930-night-thermal.webp" alt="Pre-dawn thermal image: the skylight is warmer"></div>
+        <div class="bars">
+          <div class="clock" id="thermal-clock">15:00</div>
+          <div>SKYLIGHT<span id="bar-pit" style="background:var(--lidar-cyan)"></span></div>
+          <div>SURFACE<span id="bar-surf" style="background:var(--slate-ui)"></span></div>
+        </div>
+      </div>
+      <p>THEMIS saw candidate skylights stay cooler by day and warmer at night, the thermal signature of a sheltered cavity.</p>
+      <span class="src">SOURCE: NASA/JPL-Caltech/ASU/USGS · PIA09930</span>
+    </div></section>
+    <section class="beat" data-s="8" data-t0="0.46" data-t1="1"><div class="card">
+      <h3>Outpost layout // concept <span class="sim">SIM</span></h3>
+      <div class="readout">
+        <div><span>SITE</span><b>31 × 14 M FLOOR · SLOPE 2°</b></div>
+        <div><span>ROOF ABOVE</span><b>≈ 11 M CLEAR · BASALT</b></div>
+        <div><span>SURFACE RADIATION</span><b>≈ 0.67 mSv / DAY</b></div>
+        <div><span>HERE, NOW</span><b id="rad-roof">A SMALL FRACTION</b></div>
+        <div><span>ICE (CANDIDATE)</span><b>≈ 25 M AWAY</b></div>
+      </div>
+      <p>A hub, two living modules, a greenhouse and a rover. Illustrative, not a NASA plan. Surface dose as measured by Curiosity's RAD.</p>
+    </div></section>
+    <section class="beat" data-s="9" data-t0="0.55" data-t1="1"><div class="card">
+      <h3>Induction pad</h3>
+      <div class="charge">
+        <svg viewBox="0 0 86 86" aria-hidden="true"><circle cx="43" cy="43" r="36" fill="none" stroke="#313C4B" stroke-width="7"/>
+          <circle id="charge-ring" cx="43" cy="43" r="36" fill="none" stroke="#00A8CC" stroke-width="7" stroke-linecap="round" transform="rotate(-90 43 43)" stroke-dasharray="226.2" stroke-dashoffset="140"/></svg>
+        <div><div class="big" id="charge-val">38%</div><div class="tech" style="font-size:12px">COUPLING EFFICIENCY 92% <span class="sim">SIM</span></div></div>
+      </div>
+    </div></section>
+    <section class="beat" data-s="10" data-t0="0" data-t1="0.72"><div class="card">
+      <h3>Mission summary</h3>
+      <div class="stats" style="margin-top:0">
+        <div class="stat" style="--i:0"><b>262 M</b><span>LAVA TUBE MAPPED <span class="sim">SIM</span></span></div>
+        <div class="stat" style="--i:1"><b>1.24 M</b><span>LiDAR POINTS <span class="sim">SIM</span></span></div>
+        <div class="stat" style="--i:2"><b>4</b><span>RELAY NODES DEPLOYED</span></div>
+        <div class="stat" style="--i:3"><b>1</b><span>HABITAT ZONE QUALIFIED</span></div>
+        <div class="stat" style="--i:4"><b>100%</b><span>BATTERY · DOCKED</span></div>
+        <div class="stat" style="--i:5"><b>MRO</b><span>MAP UPLINK RELAY</span></div>
+      </div>
+      <p>The lander hands the compressed 3D map to an orbital relay such as MRO, whose Electra UHF radio serves Mars surface missions.</p>
+      <p style="margin-top:12px"><a class="btn" href="drone-viewer.html" style="pointer-events:auto">Explore MAV-A1 in 3D</a></p>
+    </div></section>
+  </div>
+
+  <div class="foot">
+    <div class="profile-wrap">
+      <svg id="profile" aria-hidden="true"></svg>
+      <nav class="scrubber" id="scrubber" aria-label="Mission stages"></nav>
+    </div>
+    <div class="tech"><span id="stage-name">01 · ORBITAL APPROACH</span><span id="hint">SCROLL ↓</span>
+      <button class="snd" id="snd" type="button" aria-pressed="false" title="Mission sound, filtered the way thin CO₂ air on Mars would carry it"><span class="eq" aria-hidden="true"><i></i><i></i><i></i></span><span id="snd-lbl">SOUND OFF</span></button>
+    </div>
+  </div>
+</aside>
+
+<main id="story" aria-label="Mission story">
+  <section id="stage-1"><h2>Stage 1: Orbital approach</h2></section>
+  <section id="stage-2"><h2>Stage 2: Atmospheric entry and landing</h2></section>
+  <section id="stage-3"><h2>Stage 3: MAV-A1 launch</h2></section>
+  <section id="stage-4"><h2>Stage 4: Skylight descent</h2></section>
+  <section id="stage-5"><h2>Stage 5: LiDAR-SLAM mapping</h2></section>
+  <section id="stage-6"><h2>Stage 6: Autonomous navigation</h2></section>
+  <section id="stage-7"><h2>Stage 7: Breadcrumb relay network</h2></section>
+  <section id="stage-8"><h2>Stage 8: Habitat analysis</h2></section>
+  <section id="stage-9"><h2>Stage 9: Return and recharge</h2></section>
+  <section id="stage-10"><h2>Stage 10: Mission successful</h2></section>
+</main>
+
+<footer id="credits">
+  <div class="wrap">
+    <div>
+      <h2>NASA data used</h2>
+      <ul>
+        <li><a href="https://science.nasa.gov/photojournal/mars-topography/">MOLA topography of the Tharsis hemisphere</a><span>PIA02820 · NASA/JPL · Mars Global Surveyor</span></li>
+        <li><a href="https://photojournal.jpl.nasa.gov/catalog/PIA09929">Seven possible cave skylights on Arsia Mons</a><span>PIA09929 · NASA/JPL-Caltech/ASU/USGS · THEMIS</span></li>
+        <li><a href="https://photojournal.jpl.nasa.gov/catalog/PIA09930">Day/night temperature of a cave skylight</a><span>PIA09930 · NASA/JPL-Caltech/ASU/USGS · THEMIS</span></li>
+      </ul>
+    </div>
+    <div>
+      <h2>&nbsp;</h2>
+      <ul>
+        <li>Arsia skylight (ground texture), globe and Olympus Mons plates<span>HiRISE and Viking imagery · NASA/JPL-Caltech/UArizona, NASA/JPL/USGS</span></li>
+      </ul>
+    </div>
+    <div>
+      <h2>Also on this page</h2>
+      <ul>
+        <li>Opening approach sequence<span>Mission video, scrubbed frame by frame</span></li>
+        <li>3D terrain, lander and lava tube<span>Procedural real-time graphics</span></li>
+        <li>Pit size and depth<span>HiRISE PSP_003647_1745 and stereo PSP_004847_1745 · Univ. of Arizona / NASA/JPL-Caltech (PIA09704)</span></li>
+        <li>Photo-scanned ground, sand, rock and layered-cliff surfaces<span>Poly Haven (CC0): dry_ground_rocks, sand_01, rock_face_03, cliff_side · graded to Mars colours</span></li>
+        <li>MAV-A1 hexacopter<span>Student concept design · <a href="drone-viewer.html">interactive model</a></span></li>
+      </ul>
+    </div>
+    <p class="disclaimer">Concept mission visualization. Values marked SIM are simulated. MAV-A1 is a student concept design. NASA imagery is used with credit; no NASA endorsement is implied.</p>
+    <p class="rights">ALL RIGHTS RESERVED // MINDMELD MAV-A1</p>
+  </div>
+</footer>
+
+<div id="loader" role="status" aria-live="polite">
+  <div class="box">
+    <div class="tech cyan" style="font-size:12px">ESTABLISHING TELEMETRY LINK…</div>
+    <div class="tech" id="loader-pct" style="margin-top:6px;font-size:12px">0%</div>
+    <div class="bar"><i id="loader-bar"></i></div>
+  </div>
+</div>
+
+<script>
+  // Opened by double-clicking the file? Browsers block ES modules + WebGL textures on file:// pages.
+  if (location.protocol === 'file:') {
+    document.getElementById('loader').innerHTML =
+      '<div class="box" style="width:min(520px,calc(100vw - 32px))">' +
+      '<div class="tech orange" style="font-size:12px">OPEN THROUGH THE LOCAL SERVER</div>' +
+      '<p style="margin:10px 0 0;font-size:14px">Browsers block the 3D scene when this page is opened straight from the folder. ' +
+      'Double-click <b>start-site.bat</b> in the MAV-A1 folder. It opens <b>http://localhost:5173/</b> for you.</p>' +
+      '<p dir="rtl" lang="ar" style="margin:10px 0 0;font-size:14px">المتصفح بيمنع المشهد الـ 3D لما تفتح الملف مباشرة. اكبس مرتين على <bdi><b>start-site.bat</b></bdi> بمجلد <bdi>MAV-A1</bdi>، وهو بيفتحلك الموقع.</p></div>';
+  }
+</script>
+<script type="module" src="js/site.js"></script>
+</body>
+</html>
