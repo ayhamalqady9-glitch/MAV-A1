@@ -1,4 +1,4 @@
-# PROJECT MAV-A1 · Martian Subterranean Vanguard
+# WEB LINK
 
 **Live site: [mav-a1.pages.dev](https://mav-a1.pages.dev)**
 
