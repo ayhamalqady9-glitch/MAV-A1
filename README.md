@@ -4,6 +4,8 @@
 
 Backup copy: [ayhamalqady9-glitch.github.io/MAV-A1](https://ayhamalqady9-glitch.github.io/MAV-A1/)
 
+References: [المراجع](%D8%A7%D9%84%D9%85%D8%B1%D8%A7%D8%AC%D8%B9.md)
+
 A scroll-driven 3D mission story: MAV-A1, a proposed autonomous six-rotor hexacopter, explores a skylight on
 Arsia Mons and maps the lava tube beneath it with LiDAR-SLAM, relaying its data home through breadcrumb nodes.
 
